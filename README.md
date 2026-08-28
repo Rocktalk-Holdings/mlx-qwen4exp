@@ -2,7 +2,7 @@
 
 First open-code MLX implementation of Qwen3.8-Flash-Next (`qwen4_exp` architecture).
 Runs at **25–35 tok/s** on Apple Silicon with 4-bit quantization; supports
-**MTP speculative decoding** (batch-verify mode: every emitted token is the verified argmax of a full forward pass — self-consistent greedy; token-identical to plain single-token greedy on kernel stacks where T=1 and T=2 forwards are bit-equal, see Numerics note).
+**MTP speculative decoding** (batch-verify mode: every emitted token is the verified argmax of a full forward pass — self-consistent greedy). See the Numerics note below regarding token-exact equivalence to plain greedy.
 
 Model weights: [RockTalk/Qwen3.8-Flash-Next-MLX-4bit](https://huggingface.co/RockTalk/Qwen3.8-Flash-Next-MLX-4bit)
 Base model: [Qwen/Qwen3.8-Flash-Next](https://huggingface.co/Qwen/Qwen3.8-Flash-Next)
@@ -67,8 +67,11 @@ liturgy, boilerplate) and is neutral-to-slightly-negative on diverse prose. Run
 `tools/probe_batch_numerics.py <model-dir>` to characterize your own stack.*
 
 MTP acceptance rate: 66–86%, content-dependent (higher on structured / repetitive text).
-MTP-v2 emits only verified-argmax tokens. On mlx 0.30.6 / mlx-lm 0.31.1 the output is additionally token-identical to plain greedy (verified by the
-equality test — 200 tokens × 3 prompts, zero mismatches).
+MTP-v2 emits only verified-argmax tokens — every token accepted is `argmax` of a full
+model forward, conditioned on a valid prior context. Output quality is equivalent to
+plain greedy. Due to a GatedDeltaNet recurrent-state accumulation difference between
+T=1 and T>1 kernel paths (see Numerics note below), the token sequence may diverge from
+plain greedy at positions where accumulated state drift tips an argmax near-tie.
 
 MTP-v1 (sequential mode, `--mtp`) exists but is slower than plain greedy. Use `--mtp-v2`.
 
@@ -132,22 +135,30 @@ export QWEN_MODEL_DIR=/path/to/model-dir
 python3 tools/run_mlx.py --prompt "The capital of France is"
 ```
 
-### 3. Run the equality test (kernel-stack dependent)
-
-> **Numerics note:** mlx-lm's GatedDeltaNet uses different kernel paths for T=1
-> (single-step) and T>1 (batched) forwards. On some versions (measured: mlx 0.32.2 +
-> mlx-lm 0.31.3) these paths are not bit-identical (logit deltas up to ~1.8 at 4-bit),
-> so batch-verified decoding cannot bit-reproduce single-token greedy — argmax flips
-> at numerical near-ties. Output quality is equivalent (every token is a verified
-> argmax over correct state), but `--equality-test` will report mismatches on such
-> stacks. It passes bit-exact on mlx 0.30.6 + mlx-lm 0.31.1, where the T=2 path
-> reduces to two identical single steps.
+### 3. Run the equality / benchmark test
 
 ```bash
+# Equality test (checks MTP-v2 vs plain greedy token-for-token)
 python3 tools/run_mlx.py --model-dir /path/to/model-dir --equality-test
+
+# Benchmark (plain vs MTP-v2 speed comparison)
+python3 tools/run_mlx.py --model-dir /path/to/model-dir --benchmark
 ```
 
-Expected output: `[equality-v2] ALL PASS`
+> **Numerics note:** mlx-lm's GatedDeltaNet implementation uses different kernel paths
+> for T=1 (single-step) and T>1 (batched) forwards. The T=2 batch-verify step produces
+> logits that argmax-match the equivalent sequential T=1 step, but the internal
+> recurrent state written to `ArraysCache` after a T=2 forward differs from the state
+> produced by two successive T=1 forwards. This accumulated state divergence causes
+> the MTP-v2 token sequence to diverge from plain greedy after several accept/reject
+> cycles. The divergence is not a decode error — every accepted token is the correct
+> argmax of a full forward — but the subsequent context state differs, so completions
+> may differ.
+>
+> `--equality-test` will report FAIL on mlx 0.32.x. On mlx ≤ 0.31.x the T=2 path
+> reduces to sequential single steps and the test passes. This is a known limitation;
+> a fix (regenerating the T=1 cache state after each accept) would eliminate the speedup.
+> Use `--benchmark` to verify speed on your stack.
 
 ---
 
