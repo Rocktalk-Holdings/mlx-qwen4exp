@@ -7,6 +7,8 @@ Runs at **25–35 tok/s** on Apple Silicon with 4-bit quantization; supports
 Model weights: [RockTalk/Qwen3.8-Flash-Next-MLX-4bit](https://huggingface.co/RockTalk/Qwen3.8-Flash-Next-MLX-4bit)
 Base model: [Qwen/Qwen3.8-Flash-Next](https://huggingface.co/Qwen/Qwen3.8-Flash-Next)
 
+**Agents / maintenance:** start at [AGENTS.md](AGENTS.md) (routing only). The system map and triage→PR runbook live under [icm/](icm/). Product code is not moved.
+
 ---
 
 ## Architecture — what makes this model unusual
