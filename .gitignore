@@ -13,3 +13,7 @@ ngram_table*
 *.log
 *.tmp
 .DS_Store
+
+# ICM maintenance-run products (keep folder state via .gitkeep)
+icm/**/output/*
+!icm/**/output/.gitkeep
